@@ -28,7 +28,7 @@ async fn view_emp(id: i32, conn: DbConn) -> Value {
     conn.run(move |c| {
         let employee = employees::table.find(id)
         .get_result::<Employee>(c)
-        .expect("Error loading into Employee from DB");
+        .expect("Error loading Employee info from DB");
         json!(employee)
     }).await
 }
