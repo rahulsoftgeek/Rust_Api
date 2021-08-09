@@ -1,7 +1,7 @@
 #[macro_use] extern crate rocket;
 #[macro_use] extern crate rocket_sync_db_pools;
 #[macro_use] extern crate diesel;
-//#[macro_use] extern crate diesel_migrations;
+extern crate httpmock;
 
 mod models;
 mod schema;
@@ -13,21 +13,128 @@ use rocket::serde::json::{Json, Value, json};
 use rocket::http::Status;
 use rocket::request::{Request, FromRequest, Outcome};
 
-
-//embed_migrations!();
-
 #[database("sqlite_path")]
 struct DbConn(diesel::SqliteConnection);
 
+
 #[get("/emp")]
-async fn get_emp(_auth:BasicAuth,conn: DbConn) -> Value {
+async fn get_emp(conn: DbConn) -> Value {
     conn.run(|c| {
         let all = employees::table.limit(100).load::<Employee>(c).expect("Error loading from DB");
         json!(all)
     }).await 
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use isahc::*;
+    use httpmock::Method::*;
+    use isahc::{Request};
+
+    #[test]
+    fn get_emp_test() {
+        
+        let server = httpmock::MockServer::start();
+        let m = server.mock(|when, then| {
+            when.method(GET)
+                .path("/emp");
+                //.header("Content-Type", "application/json");
+                //.json_body(json!({"name":"Rahul2","email":"g@gmail.com"}))
+            then.status(200)
+                .header("Content-Type", "application/json");
+                });
+        let response = isahc::get(server.url("/emp")).unwrap();
+
+            m.assert();
+            assert_eq!(response.status(), 200);
+            
+    }
+
+    #[test]
+    fn auth_header_test() {
+        
+        let server = httpmock::MockServer::start();
+
+            let m = server.mock(|when, then| {
+                when.path("/emp")
+                    .header("Authorization", "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==")
+                    .header_exists("Authorization");
+                then.status(201).header("Content-Length", "0");
+            });
+        
+            let response = Request::post(&format!("http://{}/emp", server.address()))
+            .header("Authorization", "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==")
+            .body(())
+            .unwrap()
+            .send()
+            .unwrap();
+
+        m.assert();
+        assert_eq!(response.status(), 201);
+    }
+}
+
+    #[test]
+    fn url_matching_test() {
+        
+        use httpmock::{Regex};
+        use isahc::get;
+
+        let server = httpmock::MockServer::start();
+
+        let m = server.mock(|when, then| {
+            when.path("/emp/1")
+                .path_contains("emp")
+                .path_matches(Regex::new(r"\d+$").unwrap());
+            then.status(201);
+        });
+
+        get(server.url("/emp/1")).unwrap();
+
+        m.assert();
+    }
+
+    #[test]
+    //#[should_panic]
+    fn json_value_body_test() {
+
+        use isahc::{prelude::*, Request};
+        use serde_json::{json, Value};
+        use httpmock::Method::POST;
+        use httpmock::MockServer;
+
+        let server = MockServer::start();
+
+        let m = server.mock(|when, then| {
+            when.method(POST)
+                .path("/emp")
+                .header("Content-Type", "application/json")
+                .json_body(json!({"created_at":"2021-07-21 23:39:47","email":"ng@gmail.com","id":1,"name":"Nik"}));
+            then.status(201)
+                .header("Content-Type", "application/json")
+                .json_body(json!({"created_at":"2021-07-24 20:54:29","email":"g@gmail.com","id":2,"name":"Rahul2"}));
+        });
+
+        let mut response = Request::post(&format!("http://{}/emp", server.address()))
+            .header("Content-Type", "application/json")
+            .body(json!({"created_at":"2021-07-21 23:39:47","email":"ng@gmail.com","id":1,"name":"Nik"}).to_string())
+            .unwrap()
+            .send()
+            .unwrap();
+
+        let user: Value =
+            serde_json::from_str(&response.text().unwrap()).expect("cannot deserialize JSON");
+
+        // Assert
+        m.assert();
+        assert_eq!(response.status(), 201);
+        assert_eq!(user.as_object().unwrap().get("id").unwrap(), 2);
+    }
+
 #[get("/emp/<id>")]
-async fn view_emp(id: i32, _auth:BasicAuth, conn: DbConn) -> Value {
+async fn view_emp(_auth:BasicAuth, id: i32, conn: DbConn) -> Value {
     conn.run(move |c| {
         let employee = employees::table.find(id)
         .get_result::<Employee>(c)
@@ -72,6 +179,7 @@ fn internal_server_error() -> Value {
 fn unauthorized() -> Value {
     json!("401 - UnAuthorized")
 }
+
 
 pub struct BasicAuth{
     pub username: String,

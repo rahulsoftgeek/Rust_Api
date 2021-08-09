@@ -12,6 +12,8 @@ serde_json = "1.0"
 diesel = { version = "1.4", features = ["sqlite", "r2d2"] }
 diesel_migrations = "1.4"
 base64 = "0.13"
+httpmock = "0.5"
+isahc = "1.1"
 
 [dependencies.rocket_sync_db_pools]
 version = "0.1.0-rc.1"
